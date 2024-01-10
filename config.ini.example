@@ -1,0 +1,8 @@
+[ssh]
+host=192.168.200.1
+username=admin
+password=zrmt123!@#
+
+[mqtt]
+host=mqtt.example.com
+prefix=zaram/

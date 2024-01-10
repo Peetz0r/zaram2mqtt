@@ -1,0 +1,97 @@
+#!/bin/python
+
+import paramiko, time, re, paho.mqtt.publish, configparser, os
+from pprint import pprint as p
+
+print(f'Reading config from {os.getcwd()}/config.ini')
+
+
+config = configparser.ConfigParser()
+config.read("config.ini")
+
+print(f'Connecting to {config["ssh"]["host"]} as {config["ssh"]["username"]}')
+
+client = paramiko.SSHClient()
+client.load_system_host_keys()
+client.connect(config["ssh"]["host"], allow_agent=False, look_for_keys=False, username=config["ssh"]["username"], password=config["ssh"]["password"])
+
+print('Running commands')
+
+channel = client.invoke_shell()
+
+# wait till ready
+while not channel.recv_ready():
+  time.sleep(0.1)
+# extra time to be sure I guess
+time.sleep(0.5)
+# then discard motd stuff
+channel.recv(1024)
+
+channel.sendall('sfp info\r\n')
+# wait till ready
+while not channel.recv_ready():
+  time.sleep(0.1)
+# extra time to be sure I guess
+time.sleep(0.5)
+
+buffer = channel.recv(1024)
+lines = buffer.decode().split('\r\n')
+
+msgs = []
+
+for line in lines:
+  if ':' in line:
+    (key, value) = line.split(': ', 1)
+
+
+    if 'power' in key:
+      rxtx = key[0:2]
+      m = re.match(r'(-?\d*.\d+)([a-zA-Z]+) \((-?(?:\d*.\d+|inf))([a-zA-Z]+)\)', value)
+      msgs.append((f'{rxtx}_power_mw', f'{m.group(1)}'))
+      msgs.append((f'{rxtx}_power_dBm', f'{m.group(3)}'))
+    else:
+      m = re.match(r'(-?\d*.\d+)([a-zA-Z]+)?', value)
+      msgs.append((key.replace(' ', '_'), f'{m.group(1)}'))
+      if key == 'diagnostic monitoring type':
+        b = int(value, 16)
+        if b >> 4 & 1 and not b >> 5 & 1:
+          msgs.append(('calibration', 'external'))
+        elif b >> 5 & 1 and not b >> 4 & 1:
+          msgs.append(('calibration', 'internal'))
+        else :
+          msgs.append(('calibration', 'unknown'))
+
+        msgs.append(('power_measurement_type', (b >> 5 & 1) and 'average' or 'OMA'))
+        msgs.append(('SFF-8472_compliant', str(bool((b >> 6 & 1) and not (b >> 7 & 1)))))
+
+
+channel.sendall('onu show elapsed time\r\n')
+# wait till ready
+while not channel.recv_ready():
+  time.sleep(0.1)
+# extra time to be sure I guess
+time.sleep(0.5)
+
+buffer = channel.recv(1024)
+lines = buffer.decode().split('\r\n')
+
+for line in lines:
+  if 'from' in line:
+    m = re.search(r'from ([a-z]+)', line)
+    topic=m.group(1)
+
+    m = re.search(r'(\d+):(\d+):(\d+)', line)
+    time = int(m.group(1))*3600 + int(m.group(2))*60 + int(m.group(3))
+
+    msgs.append((f'uptime/{topic}', time))
+
+prefix = config["mqtt"]["prefix"].strip("/")
+
+print(f'Sending messages to {config["mqtt"]["host"]} using {prefix}')
+
+msgs = [(f'{prefix}/{msg[0]}', msg[1], 0, True) for msg in msgs]
+p(msgs)
+
+paho.mqtt.publish.multiple(msgs, hostname=config["mqtt"]["host"], client_id="zaram2mqtt")
+
+print('Done.')

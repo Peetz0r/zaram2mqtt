@@ -1,0 +1,10 @@
+[Unit]
+Description=Runs zaram2mqtt periodically
+
+[Timer]
+OnActiveSec=0
+OnUnitActiveSec=60
+AccuracySec=500msec
+
+[Install]
+WantedBy = multi-user.target

@@ -1,0 +1,9 @@
+[Unit]
+Description=Zaram => MQTT
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python /home/peter/zaram2mqtt/zaram2mqtt
+WorkingDirectory=/home/peter/zaram2mqtt/
+TimeoutStartSec=30s
+User=peter
